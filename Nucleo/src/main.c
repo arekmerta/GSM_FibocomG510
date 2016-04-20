@@ -19,11 +19,19 @@
 #define WD_RETRIES 200
 //Delay (in ms) between watchdog ticks
 #define WD_DELAY 1
-#undef DEBUG
-
+#define DEBUG
+//constant values
 const char retOK[]    = {"OK"};
 const char retERROR[] = {"ERROR"};
 
+
+#ifdef DEBUG
+#define debugTron(...) printf(__VA_ARGS__)
+#endif
+
+#ifndef DEBUG
+#define debugTron(...) ;
+#endif
 /******************************************
  * Delay function: wait timeMs for further processing
  * timeMs: number of miliseconds to wait
@@ -56,13 +64,11 @@ int __io_putchar(int c)
  * USARTx: USART port
  * txt: input string
  */
-void send(USART_TypeDef* USARTx, const char* txt)
-{
+void send(USART_TypeDef* USARTx, const char* txt){
     while( *txt ){
     	while (USART_GetFlagStatus(USARTx, USART_FLAG_TXE) == RESET);
     	USART_SendData(USARTx, *txt++);
     }
-
 }
 
 /***************************
@@ -75,9 +81,9 @@ void sendATcommand(
 		const char* postEcho,
 		char* bufRet,
 		int bufRetSize ) {
-	printf("-----------------\r\n");
+	debugTron("-----------------\r\n");
 	//Send AT command to G510; AT commands must finish with \r\n
-	printf("Sending command: %s\r\n", cmd);
+	debugTron("Sending command: %s\r\n", cmd);
 
 	send(USARTx, cmd );
     if( pars )send(USARTx, pars);
@@ -109,35 +115,35 @@ void sendATcommand(
 	int len = 0;
 	for(int i=0; i < bufPos; i++, len++){
 		char c = *buf++;
-#ifdef DEBUG
+/*
 		if(isalnum(c)){
 			printf("-%c{%d}",c,(int)c);
 		}else
 			printf("-{%d}",(int)c);
-#endif
+*/
 		if( c == '\r' ){
 			//End of line or buffer overrun, print output
 			strncpy(bufString, beg, len);
 			bufString[len]='\0';
-#ifdef DEBUG
+/*
 			printf("\r\nReceived [%d]: %s\r\n", len, bufString);
-#endif
+*/
 			if( !strncmp(bufString, retOK, strlen(retOK)) ){
-				printf("-->>Received OK\r\n");
+				debugTron("-->>Received OK\r\n");
 			}else
 			if( !strncmp(bufString, retERROR, strlen(retERROR)) ){
-				printf("-->>Received ERROR\r\n");
+				debugTron("-->>Received ERROR\r\n");
 			}
 			else
 			if( !strncmp(bufString, cmd, strlen(cmd)-2) ){
-				printf("-->>Received echo\r\n");
+				debugTron("-->>Received echo\r\n");
 			}else if( len>4 && !strncmp(bufString, cmd+2, strlen(cmd)-4) ){
 
 				if( bufRet ){
 					int aLen = strlen(cmd)-4+1;
-					printf("-->>Received length: %d\r\n", aLen);
-					strncpy(bufRet, bufString+aLen, len - aLen );
-					printf("-->>Received result: %s|\r\n", bufRet);
+					debugTron("-->>Received length: %d\r\n", aLen);
+					strncpy(bufRet, bufString+aLen, len - aLen +1 );
+					debugTron("-->>Received result: %s\r\n", bufRet);
 				}
 
 			}
@@ -211,16 +217,25 @@ int main(void)
 {
 	static int _bufSize=200;
 	char bufRet[_bufSize];
+
 	setup();
 	for(;;){
 
 		sendATcommand(USART1, "AT\r\n",      NULL, NULL, bufRet, _bufSize);
+
 		sendATcommand(USART1, "AT+CGMI\r\n", NULL, NULL, bufRet, _bufSize);
+		printf( "Manufacturer: %s", bufRet );
 		sendATcommand(USART1, "AT+CGMM\r\n", NULL, NULL, bufRet, _bufSize);
+		printf( "Technologies: %s", bufRet );
+
 		sendATcommand(USART1, "AT+CGMR\r\n", NULL, NULL, bufRet, _bufSize);
+		printf( "Revision: %s", bufRet );
+
 		sendATcommand(USART1, "AT+CGSN\r\n", NULL, NULL, bufRet, _bufSize);
+		printf( "IMEI: %s", bufRet );
 
 		delay(10000);
 
 	}
 }
+
