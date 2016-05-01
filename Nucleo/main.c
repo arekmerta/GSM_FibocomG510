@@ -3,7 +3,7 @@
   * @file    main.c
   * @author  Arkadiusz Merta
   * @version V0.1
-  * @date    10-April-2016
+  * @date    21-April-2016
   * @brief   FibocomG510-based GSM extension from MikroTar.pl
   * This code is based on:
   * forbot.pl        : http://forbot.pl/blog/artykuly/programowanie/stm32-praktyce-1-platforma-srodowisko-id2733
@@ -19,11 +19,26 @@
 #define WD_RETRIES 200
 //Delay (in ms) between watchdog ticks
 #define WD_DELAY 1
-#undef DEBUG
-
+#define DEBUG
+//constant values
 const char retOK[]    = {"OK"};
 const char retERROR[] = {"ERROR"};
 
+
+#ifdef DEBUG
+#define debugTron(...) printf(__VA_ARGS__)
+#endif
+
+#ifndef DEBUG
+#define debugTron(...) ;
+#endif
+
+#define TRUE 1
+#define FALSE 0
+typedef unsigned char bool;
+
+static int _bufSize=50;
+char bufRet[_bufSize ];
 /******************************************
  * Delay function: wait timeMs for further processing
  * timeMs: number of miliseconds to wait
@@ -56,28 +71,64 @@ int __io_putchar(int c)
  * USARTx: USART port
  * txt: input string
  */
-void send(USART_TypeDef* USARTx, const char* txt)
-{
+void send(USART_TypeDef* USARTx, const char* txt){
     while( *txt ){
     	while (USART_GetFlagStatus(USARTx, USART_FLAG_TXE) == RESET);
     	USART_SendData(USARTx, *txt++);
     }
-
 }
-
+/*****************************************
+/*
+ * Send AT command: given number of times with a
+ * delay between retries
+ * USARTx: pointer to a software serial interface
+ * cmd: AT command (with AT+)
+ * pars: command parameters
+ * postEcho: something to be sent if asked (after '>')
+ * bufRet: buffer for a return value
+ * bufRetSize: size of bufRet (max 255)
+ * repeat: number of times tha command will be issued
+ * delays: delay between each iteration
+ * return: true if OK returned from AT command; false otherwise
+*/
+bool sendATcommandS(USART_TypeDef* USARTx,
+		const char* cmd,
+		const char* pars,
+		const char* postEcho,
+		char* bufRet,
+		int bufRetSize,
+        unsigned char repeat,
+        int delays ) {
+	//Repeat AT message 'repeat' times
+	for (int z = 0; z < repeat; z++) {
+		debugTron("Sending command for the (time)", z);
+		if ( sendATcommand(USARTx, cmd, pars, postEcho, bufRet, bufRetSize) ) {
+			return TRUE;
+		}
+		delay(delays);
+	}
+	return FALSE;
+}
 /***************************
- * Arduino IDE-like, loop function
+ * Send an AT command
+ * ss: pointer to a software serial interface
+ * cmd: AT command (with AT+)
+ * pars: command parameters
+ * postEcho: something to be sent if asked (after '>')
+ * bufRet: buffer for a return value
+ * bufRetSize: size of bufRet (max 255)
+ * return: true if OK returned from AT command; false otherwise
  */
-void sendATcommand(
+bool sendATcommand(
 		USART_TypeDef* USARTx,
 		const char* cmd,
 		const char* pars,
 		const char* postEcho,
 		char* bufRet,
 		int bufRetSize ) {
-	printf("-----------------\r\n");
+	debugTron("-----------------\r\n");
 	//Send AT command to G510; AT commands must finish with \r\n
-	printf("Sending command: %s\r\n", cmd);
+	debugTron("Sending command: %s\r\n", cmd);
 
 	send(USARTx, cmd );
     if( pars )send(USARTx, pars);
@@ -109,35 +160,35 @@ void sendATcommand(
 	int len = 0;
 	for(int i=0; i < bufPos; i++, len++){
 		char c = *buf++;
-#ifdef DEBUG
+/*
 		if(isalnum(c)){
 			printf("-%c{%d}",c,(int)c);
 		}else
 			printf("-{%d}",(int)c);
-#endif
+*/
 		if( c == '\r' ){
 			//End of line or buffer overrun, print output
 			strncpy(bufString, beg, len);
 			bufString[len]='\0';
-#ifdef DEBUG
+/*
 			printf("\r\nReceived [%d]: %s\r\n", len, bufString);
-#endif
+*/
 			if( !strncmp(bufString, retOK, strlen(retOK)) ){
-				printf("-->>Received OK\r\n");
+				debugTron("-->>Received OK\r\n");
 			}else
 			if( !strncmp(bufString, retERROR, strlen(retERROR)) ){
-				printf("-->>Received ERROR\r\n");
+				debugTron("-->>Received ERROR\r\n");
 			}
 			else
 			if( !strncmp(bufString, cmd, strlen(cmd)-2) ){
-				printf("-->>Received echo\r\n");
+				debugTron("-->>Received echo\r\n");
 			}else if( len>4 && !strncmp(bufString, cmd+2, strlen(cmd)-4) ){
 
 				if( bufRet ){
 					int aLen = strlen(cmd)-4+1;
-					printf("-->>Received length: %d\r\n", aLen);
-					strncpy(bufRet, bufString+aLen, len - aLen );
-					printf("-->>Received result: %s|\r\n", bufRet);
+					debugTron("-->>Received length: %d\r\n", aLen);
+					strncpy(bufRet, bufString+aLen, len - aLen +1 );
+					debugTron("-->>Received result: %s\r\n", bufRet);
 				}
 
 			}
@@ -146,7 +197,7 @@ void sendATcommand(
 		}
 
 	}
-
+    return FALSE;
 }
 
 /*****************************************
@@ -204,23 +255,94 @@ void setup() {
 	printf("Setup completed.\r\n");
 
 }
+//*****************************************
+/*
+  Check if chip is on by sending AT command
+  return: true if chip on now, false otherwise
+*/
+bool chipPresent() {
+	//Try 5 times with 50ms intervals
+	if ( sendATcommandS(USART2, "AT", NULL, NULL, bufRet, 20, 5, 50) ) {
+		debugStep("Chip found, ok");
+		return TRUE;
+	}
+	debugStep("Chip NOT found, fail");
+	return FALSE;
+}
+/*****************************************
+/*
+   This function is to display some
+   basic capabilities of the G510 chip
+   return: true if all pars
+*/
+bool displayModuleCaps() {
+
+	if( !chipPresent() ){
+		printf("Could not find the GSM module... exiting");
+		return FALSE;
+	}else {
+		printf("Module found, ok");
+	}
+
+	if( sendATcommand(USART1, "AT+CGMI\r\n", NULL, NULL, bufRet, _bufSize)){
+		printf("Manufacturer: %c", bufRet);
+	} else {
+		printf("Could NOT read manufacturer, fail");
+		return FALSE;
+	}
+
+	if ( sendATcommand(USART1, "AT+CGMM", NULL, NULL, bufRet, _bufSize)) {
+		printf("Technologies: %c", bufRet);
+	} else {
+		printf("Could NOT read technologies, fail");
+		return FALSE;
+	}
+
+	if ( sendATcommand(USART1, "AT+CGMR", NULL, NULL, bufRet, _bufSize)) {
+		printf("Revision    : %c", bufRet);
+	} else {
+		printf("Could NOT read revision, fail");
+		return FALSE;
+	}
+
+	if ( sendATcommand(USART1, "AT+CGSN", NULL, NULL, bufRet, _bufSize) ) {
+		printf("IMEI        : %c", bufRet);
+	} else {
+		printf("Could NOT read IMEI, fail");
+		return FALSE;
+	}
+
+
+	return TRUE;
+}
+/*****************************************
+ * Loop function
+ */
+void loop(){
+	static bool capsDisplayed = FALSE;
+	static bool smsSent = FALSE;
+	printf("=====================================");
+	//If caps read not successful - repeat
+	if ( !capsDisplayed ) {
+		capsDisplayed = displayModuleCaps();
+	}
+	//If SMS not send - repeat
+	if ( capsDisplayed && !smsSent ) {
+		//Use your mobile number instead of ********
+		//smsSent = sms("+48********", "Hello from uczymy.edu.pl");
+	}
+	//Give module 5s to get a grasp
+	delay(5000);
+
+}
 /*****************************************
  * Main function
  */
 int main(void)
 {
-	static int _bufSize=200;
-	char bufRet[_bufSize];
 	setup();
 	for(;;){
-
-		sendATcommand(USART1, "AT\r\n",      NULL, NULL, bufRet, _bufSize);
-		sendATcommand(USART1, "AT+CGMI\r\n", NULL, NULL, bufRet, _bufSize);
-		sendATcommand(USART1, "AT+CGMM\r\n", NULL, NULL, bufRet, _bufSize);
-		sendATcommand(USART1, "AT+CGMR\r\n", NULL, NULL, bufRet, _bufSize);
-		sendATcommand(USART1, "AT+CGSN\r\n", NULL, NULL, bufRet, _bufSize);
-
-		delay(10000);
-
+		loop();
 	}
 }
+
