@@ -37,7 +37,7 @@ bool capsDisplayed = false;
 //Delay (in ms) between watchdog ticks
 #define WD_DELAY 50
 //Debug: set to true to see debugMe messages
-#define DEBUG false
+#define DEBUG true
 //Debug helper macros
 #define debugTron(descr_, val_) \
   if(DEBUG){ \
@@ -348,36 +348,30 @@ bool sms(const char* cellNo, const char* message) {
   //Check if chip is present
   if ( !chipPresent()) {
     Serial.println("Could not find GSM module... exiting");
-    return false;
-  }
-
+  }else
   //Set the text mode mode
   if ( !setTextSMSMode() ) {
     Serial.println("Could not set Text SMS module... exiting");
-    return false;
-  }
-
+  }else
   //Check if SMS center number is available
   if ( !sendATcommand( &ss, "AT+CSCA", "?", NULL, bufRet, bufSize ) ) {
     Serial.println("SMS centre not set... exiting");
-    return false;
   } else {
     Serial.print("SMS centre  : ");
     Serial.println(bufRet);
-  }
+    //Mobile number must be between quotes
+    sprintf(bufCellNoMy, "=\"%s\"\0", cellNo );
+  
+    //Message must end with \x1a<CR><LF>
+    sprintf(bufMessageMy, "%s%c\0", message, substChar );
 
-  //Mobile number must be between quotes
-  sprintf(bufCellNoMy, "=\"%s\"\0", cellNo );
-
-  //Message must end with \x1a<CR><LF>
-  sprintf(bufMessageMy, "%s%c\0", message, substChar );
-
-  //Send SMS and rememeber status
-  bSMSsent = sendATcommand( &ss, "AT+CMGS", bufCellNoMy, bufMessageMy, bufRet, bufSize );
-  if ( bSMSsent ) {
-    Serial.println("SMS sent.");
-  } else {
-    Serial.println("Could not send SMS.");
+    //Send SMS and rememeber status
+    bSMSsent = sendATcommand( &ss, "AT+CMGS", bufCellNoMy, bufMessageMy, bufRet, bufSize );
+    if ( bSMSsent ) {
+      Serial.println("SMS sent.");
+    } else {
+      Serial.println("Could not send SMS.");
+    }
   }
   //Cleanup
   delete [] bufMessageMy;
